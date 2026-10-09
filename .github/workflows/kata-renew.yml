@@ -2,8 +2,8 @@ name: "@s5gydl kata 自动续期任务"
 
 on:
   schedule:
-    # 每天执行：UTC 22:00 (北京时间 次日早上 06:00)
-    - cron: '0 22 * * *'
+    # 每天执行：UTC 01:00 (北京时间 上午 09:00)
+    - cron: '0 1 * * *'
   workflow_dispatch: # 允许手动触发
 
 jobs:
@@ -11,54 +11,32 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     
     steps:
-    - uses: actions/checkout@v5
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v5
-      with:
-        node-version: '22'
-        cache: 'npm'
+    - uses: actions/checkout@v4
 
-    - name: Cache Node Modules
-      id: cache-npm
-      uses: actions/cache@v4
+    - name: Setup Python
+      uses: actions/setup-python@v5
       with:
-        path: node_modules
-        key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
+        python-version: '3.12'
+        cache: 'pip'
 
-    - name: Cache Playwright
-      id: cache-playwright
-      uses: actions/cache@v4
-      with:
-        path: ~/.cache/ms-playwright
-        key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
-
-    - name: Install Dependencies
+    - name: Install system dependencies
       run: |
-        if [ "${{ steps.cache-npm.outputs.cache-hit }}" != "true" ]; then
-          echo "📦 未命中缓存，安装 NPM 依赖..."
-          npm ci || npm install
-        else
-          echo "⚡ 命中 Node Modules 缓存，跳过 npm install"
-        fi
-        if [ "${{ steps.cache-playwright.outputs.cache-hit }}" != "true" ]; then
-          echo "🌐 未命中缓存，安装 Playwright 系统环境依赖..."
-          npx playwright install-deps chrome
-        else
-          echo "⚡ 命中 Playwright 依赖缓存，跳过重复下载"
-        fi
-      
+        sudo apt-get update
+        sudo apt-get install -y xvfb curl wget gzip
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        sbase install chromedriver || true
+
     - name: Run Renew Script
       env:
-        # 将 USERS_JSON 配置在 GitHub Repository Secrets 中
-        # 格式: [{"username": "xxx", "password": "xxx"}, ...]
-        USERS_JSON: ${{ secrets.USERS_JSON || secrets.USERS }}
-        USERS: ${{ secrets.USERS || secrets.USERS_JSON }}
-        # 代理变量（只需配置 PROXY_URL 或 SUB_URL 其中一个即可，脚本自动智能解析订阅/S5/TG等任意格式）
+        # 账号变量：仅使用 USERS_JSON (配置在 GitHub Repository Secrets 中)
+        USERS_JSON: ${{ secrets.USERS_JSON }}
+        # 代理变量（配置 PROXY_URL 或 SUB_URL 其中一个即可，脚本自动智能解析订阅/S5/TG等任意格式）
         PROXY_URL: ${{ secrets.PROXY_URL }}
         SUB_URL: ${{ secrets.SUB_URL }}
         S5_URL: ${{ secrets.S5_URL }}
@@ -66,8 +44,8 @@ jobs:
         TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
         TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         TG_THREAD_ID: ${{ secrets.TG_THREAD_ID }}
-      # 使用 xvfb-run 模拟有头环境运行
-      run: xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" node kata_renew.js
+      # 使用 xvfb-run 模拟有头环境运行 SeleniumBase UC 模式
+      run: xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" python kata_renew.py
 
     - name: Commit Renew Dates
       if: always()
@@ -87,7 +65,9 @@ jobs:
 
     - name: Upload Screenshots
       if: always()
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v4
       with:
-        name: screenshots
+        name: screenshots-${{ github.run_number }}
         path: screenshots/
+        if-no-files-found: ignore
+        retention-days: 7
